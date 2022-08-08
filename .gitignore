@@ -1,0 +1,6 @@
+submodule/build
+venv
+**/.idea
+**/drop_gil.egg-info
+**/dist
+*.so
