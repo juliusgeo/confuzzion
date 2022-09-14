@@ -6,7 +6,14 @@
 
 PyObject* f(PyObject *self, PyObject *args){
     Py_BEGIN_ALLOW_THREADS
-    sleep(0.0000000000000000000000000000001);
+    sleep(0.000001);
+    Py_END_ALLOW_THREADS
+    Py_RETURN_NONE;
+}
+
+PyObject* f2(PyObject *self, PyObject *args){
+    Py_BEGIN_ALLOW_THREADS
+    sleep(((float)rand()/(float)(RAND_MAX))*0.0001);
     Py_END_ALLOW_THREADS
     Py_RETURN_NONE;
 }
@@ -14,6 +21,8 @@ PyObject* f(PyObject *self, PyObject *args){
 static PyMethodDef drop_gilMethods[] = {
     {"f",  f, METH_VARARGS,
      "Drop the GIL"},
+     {"f2",  f, METH_VARARGS,
+     "Drop the GIL, but random"},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

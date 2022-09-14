@@ -1,15 +1,48 @@
 from threading import Thread, Lock
 import sys
-from codetransformer import CodeTransformer, instructions, pattern, Code
-from codetransformer import patterns
 from time import monotonic_ns, sleep
-import numpy as np
 from functools import cache
-from drop_gil import f
+
+from codetransformer import CodeTransformer, instructions, pattern, Code, patterns
+import numpy as np
+from drop_gil import f, f2
+
+
+class SysIntervalContext(object):
+    def __init__(self, interval):
+        self.__interval = interval
+
+    def __enter__(self):
+        temp = sys.getswitchinterval()
+        sys.setswitchinterval(self.__interval)
+        self.__interval = temp
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.setswitchinterval(self.__interval)
+
+
+class InjectSleep(CodeTransformer):
+    def __init__(self, func):
+        self.__payload = list(Code.from_pyfunc(func))[:-2]
+
+    @pattern(
+        instructions.LOAD_GLOBAL | instructions.LOAD_FAST,
+        patterns.matchany[patterns.var],
+        instructions.STORE_GLOBAL | instructions.STORE_ATTR,
+    )
+    def entry(self, *args):
+        for instr in args:
+            yield from self.__payload
+            yield instr
 
 global_v = 0
 global_v_2 = 0
 global_lock = Lock()
+
+
+class BasicClass:
+    val = 0
+    lock = Lock()
 
 
 def time_module_sleep():
@@ -22,42 +55,13 @@ def my_extension_sleep():
     return True
 
 
+def my_extension_sleep_random():
+    f2(0)
+    return True
+
+
 def no_sleeps():
     return False
-
-
-class BasicClass:
-    val = 0
-    lock = Lock()
-
-
-class SysIntervalContext(object):
-    def __init__(self, interval):
-        self.__interval = interval
-
-    def __enter__(self):
-        sys.setswitchinterval(self.__interval)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.setswitchinterval(.005)
-
-
-class InjectSleep(CodeTransformer):
-    def __init__(self, func):
-        self.__payload = list(Code.from_pyfunc(func))[:-2]
-
-    @pattern(
-        instructions.LOAD_GLOBAL,
-        patterns.matchany[patterns.var],
-        instructions.STORE_GLOBAL,
-    )
-    def entry(self, *args):
-        prev = None
-        for instr, lineno in zip(self.code, sorted(self.code.lno_of_instr.values())):
-            if prev != lineno:
-                prev = lineno
-                yield from self.__payload
-            yield instr
 
 
 def foo(obj):
@@ -81,8 +85,7 @@ def foo_object(obj):
 def foo_object_safe(obj):
     with obj.lock:
         x = obj.val
-        obj.val = x + 1
-
+        obj.val = x + 1q
 
 @cache
 def transform_func(func, inject):
@@ -91,7 +94,7 @@ def transform_func(func, inject):
     return func
 
 
-def run(n_workers, fun, args, inject, interval=.005):
+def run_threads(n_workers, fun, args, inject, interval=.005):
     funcs = [transform_func(fun, inject) for _ in range(n_workers)]
     pool = [Thread(target=func, args=args) for func in funcs]
     with SysIntervalContext(interval):
@@ -104,29 +107,53 @@ def run(n_workers, fun, args, inject, interval=.005):
     return end-beg
 
 
-if __name__ == '__main__':
-    n_threads = 4
+def run_scenario(n_threads, inject, interval, func, num_iter):
+    global global_v, global_v_2, global_lock
     expected = n_threads
-    times = []
-    errors = []
-    labels = []
-    for inject in [my_extension_sleep, time_module_sleep, no_sleeps]:
-        for interval in [.0000000001, .005]:
-            for func in [foo, foo_safe, foo_object, foo_object_safe]:
-                labels.append(f"({interval}, {inject.__name__}, {func.__name__})")
-                avg_time = []
-                avg_error = []
-                for _ in range(1000):
-                    global_v = 0
-                    global_v_2 = 0
-                    thread_obj = BasicClass()
-                    avg_time.append((run(n_threads, func, [thread_obj], inject=inject, interval=interval)))
-                    avg_error.append(100*(abs(expected-max(global_v, global_v_2, thread_obj.val)))/expected)
-                times.append(np.mean(avg_time, axis=0))
-                errors.append(np.mean(avg_error, axis=0))
+    label = f"({interval:.3e}, {func.__name__}, {inject.__name__})"
+    avg_time = []
+    avg_error = []
+    for _ in range(num_iter):
+        global_v = 0
+        global_v_2 = 0
+        thread_obj = BasicClass()
+        avg_time.append((run_threads(n_threads, func, [thread_obj], inject=inject, interval=interval)) / 10 ** 3)
+        avg_error.append(100 * (abs(expected - max(global_v, global_v_2, thread_obj.val))) / expected)
+    return label, np.mean(avg_time, axis=0), np.mean(avg_error, axis=0)
 
 
-print("{:<50} {:<10} {:<15}".format('COMBO', 'ERROR (%)', 'TIME (ms)'))
+def get_func_from_name(name):
+    return getattr(sys.modules[__name__], name)
 
-for row in zip(labels, errors, times):
-    print("{:<50} {:<10} {:<15}".format(*row))
+
+if __name__ == '__main__':
+    n_threads = 8
+    num_iter = 100_100
+    labels, times, errors = [], [], []
+    if len(sys.argv) > 1:
+        inject, interval, func, num_iter = get_func_from_name(sys.argv[1]), float(sys.argv[2]), get_func_from_name(
+            sys.argv[3]), int(sys.argv[4])
+        print(run_scenario(n_threads, inject, interval, func, num_iter))
+
+    for inject in [no_sleeps, my_extension_sleep, time_module_sleep, my_extension_sleep_random]:
+        for interval in [1/2**128, .005]:
+            for func in [foo, foo_object, foo_safe, foo_object_safe]:
+                label, avg_time, avg_error = run_scenario(n_threads, inject, interval, func, num_iter)
+                labels.append(label)
+                times.append(avg_time)
+                errors.append(avg_error)
+
+
+def output_human_table(labels, errors, times):
+    print("{:<80} {:<15} {:<15}".format('COMBO', 'ERROR (%)', 'TIME (ms)'))
+    for row in sorted(zip(labels, errors, times), key=lambda x: x[1]):
+        print("{:<80} {:<15} {:<15}".format(*row))
+
+
+def output_markdown_table(labels, errors, times):
+    print("|{}|{}|{}|".format('COMBO', 'ERROR (%)', 'TIME (ms)'))
+    print("|{}|{}|{}|".format('-------', '--------', '---------'))
+    for row in sorted(zip(labels, np.around(errors, decimals=3), np.around(times, decimals=3)), key=lambda x: x[1]):
+        print("|{}|{}|{}|".format(*row))
+
+
