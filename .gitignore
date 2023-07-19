@@ -4,3 +4,4 @@ venv
 **/drop_gil.egg-info
 **/dist
 *.so
+__pycache__/

@@ -66,26 +66,22 @@ def no_sleeps():
 
 def foo(obj):
     global global_v
-    x = global_v
-    global_v = x+1
+    global_v = global_v+1
 
 
 def foo_safe(obj):
     global global_v_2
     with global_lock:
-        x = global_v_2
-        global_v_2 = x + 1
+        global_v_2 = global_v_2 + 1
 
 
 def foo_object(obj):
-    x = obj.val
-    obj.val = x + 1
+    obj.val = obj.val + 1
 
 
 def foo_object_safe(obj):
     with obj.lock:
-        x = obj.val
-        obj.val = x + 1q
+        obj.val = obj.val + 1
 
 @cache
 def transform_func(func, inject):
@@ -126,9 +122,21 @@ def get_func_from_name(name):
     return getattr(sys.modules[__name__], name)
 
 
+def output_human_table(labels, errors, times):
+    print("{:<80} {:<15} {:<15}".format('COMBO', 'ERROR (%)', 'TIME (ms)'))
+    for row in sorted(zip(labels, errors, times), key=lambda x: x[1]):
+        print("{:<80} {:<15} {:<15}".format(*row))
+
+
+def output_markdown_table(labels, errors, times):
+    print("|{}|{}|{}|".format('COMBO', 'ERROR (%)', 'TIME (ms)'))
+    print("|{}|{}|{}|".format('-------', '--------', '---------'))
+    for row in sorted(zip(labels, np.around(errors, decimals=3), np.around(times, decimals=3)), key=lambda x: x[1]):
+        print("|{}|{}|{}|".format(*row))
+
 if __name__ == '__main__':
     n_threads = 8
-    num_iter = 100_100
+    num_iter = 1000
     labels, times, errors = [], [], []
     if len(sys.argv) > 1:
         inject, interval, func, num_iter = get_func_from_name(sys.argv[1]), float(sys.argv[2]), get_func_from_name(
@@ -142,18 +150,7 @@ if __name__ == '__main__':
                 labels.append(label)
                 times.append(avg_time)
                 errors.append(avg_error)
+    output_human_table(labels, errors, times)
 
-
-def output_human_table(labels, errors, times):
-    print("{:<80} {:<15} {:<15}".format('COMBO', 'ERROR (%)', 'TIME (ms)'))
-    for row in sorted(zip(labels, errors, times), key=lambda x: x[1]):
-        print("{:<80} {:<15} {:<15}".format(*row))
-
-
-def output_markdown_table(labels, errors, times):
-    print("|{}|{}|{}|".format('COMBO', 'ERROR (%)', 'TIME (ms)'))
-    print("|{}|{}|{}|".format('-------', '--------', '---------'))
-    for row in sorted(zip(labels, np.around(errors, decimals=3), np.around(times, decimals=3)), key=lambda x: x[1]):
-        print("|{}|{}|{}|".format(*row))
 
 

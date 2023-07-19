@@ -1,12 +1,6 @@
 # Anomalous Sea Snake or: How I Learned to Stop Worrying and Love the GIL
 
-> "Bytecode is an implementation detail of the CPython interpreter. No guarantees are made that bytecode will not be added, removed, or changed between versions of Python. Use of this module should not be considered to work across Python VMs or Python releases."
-
-Just gonna let that quote soak in (no sinking) while I explain some other stuff.
-
 If you've played around with the `threading` module in Python, you have probably heard of this thing unique to Python (well, just some implementations of Python to be exact, but I will not make that distinction) called the Global Interpreter Lock. It is basically a lock (semaphore underneath, but again, will not make that distinction) that controls access to the Python interpreter. This means that to execute any Python interpreter operation, you must hold this lock. In this article I will show you how to utilize the GIL combined with a few other aspects of Python's threading model to build a convincing case for my approach to concurrency fuzzing. 
-
-If you haven't heard of concurrency fuzzing, you're not alone, it doesn't even merit a graph on trends.google.com, google instead prompting me to pick a more general term. Concurrency fuzzing is the name for a whole host of methods intended to expose race conditions. The approach to fuzzing generally depends a lot on the language, but one will often see usage of breakpoints or a custom OS scheduler to be able to influence the scheduling of threads. There are a lot of things that go into concurrency fuzzing, but the one I am going to focus on is specifically intentionally influencing scheduling of threads in such a way that we can increase the likelihood of an error happening (thus allowing a programmer to inspect and fix). 
 
 So the first question is: how does scheduling work for Python threads?
 Well, the answer to that depends on what OS you're running, as Python basically leaves it up to your kernel's thread scheduler.
@@ -355,8 +349,6 @@ Drumroll please!
 
 Here is the output of my program with `num_iter` set to `100_000`:
 
-
-
 | COMBO                                                   | ERROR (%) | TIME (ms) |
 | ------------------------------------------------------- | --------- | --------- |
 | (2.939e-39, foo_safe, no_sleeps)                        | 0.0       | 198.521   |
@@ -393,18 +385,6 @@ Here is the output of my program with `num_iter` set to `100_000`:
 | **(2.939e-39, foo_object, my_extension_sleep_random)**  | 34.242    | 373.459   |
 
 As you can see from these results, there are very clearly at least two groups. The safe functions all have an error of zero. This is what we expected--but it's good confirmation that we aren't doing *blatantly* wrong. Now for the unsafe ones, at the very bottom is not injecting anything, just doing `sys.setswitchinterval(1/2**128)`. This, thankfully, is much worse than my solution. However, interestingly enough, if you look at the bottom you can see that a low `switchinterval` value seems to have a synergistic effect with my approach, yielding a 13% increase if you compare the two bolded combinations in the table above. Now, you are probably also noticing the rightmost column, which lists the time per run in milliseconds. This increases nearly two fold comparing our best performing solution (373.459ms) with just cranking up the `switchinterval`(198.665ms). However--because our solution induces so much more error than those approaches (34.242% vs. .002%), it makes it worthwhile. Even if it takes twice as long, if you only have to run it one or two times to expose a bug, it's better than something that takes half as long but you have to run 100 times to expose the same bug. 
-
-Ok, that was cool, but it was still pretty contrived. 
-
-
-
-
-
-
-
-
-
-
 
 ### Works Cited
 
